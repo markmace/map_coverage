@@ -123,32 +123,41 @@ class StravaStreetCoverageTracker:
                     
         return points
         
-    def load_gpx_directory(self, gpx_dir):
+    def load_gpx_directory(self, gpx_dir, activity_type="Run"):
         """
         Load activities from a directory of GPX files
         
         Args:
-            gpx_dir: Directory containing GPX files
+            gpx_dir: Directory containing GPX files (searches recursively)
+            activity_type: Type of activities to load ("Run", "Bike", "Walk", "Hike", "All")
         """
         if not os.path.exists(gpx_dir):
             print(f"Directory {gpx_dir} not found!")
             return
             
-        for filename in os.listdir(gpx_dir):
-            if filename.endswith('.gpx'):
-                filepath = os.path.join(gpx_dir, filename)
-                try:
-                    points = self.load_gpx_file(filepath)
-                    if points:
-                        self.activities.append({
-                            'filename': filename,
-                            'points': points,
-                            'date': filename.split('_')[0]  # Assuming date is in filename
-                        })
-                except Exception as e:
-                    print(f"Error loading {filename}: {e}")
+        # Walk through directory and subdirectories
+        for root, dirs, files in os.walk(gpx_dir):
+            for filename in files:
+                if filename.endswith('.gpx'):
+                    # Filter by activity type if not "All"
+                    if activity_type != "All":
+                        # Check if the activity type is in the filename or directory name
+                        if activity_type.lower() not in filename.lower() and activity_type.lower() not in root.lower():
+                            continue
                     
-        print(f"Loaded {len(self.activities)} activities from {gpx_dir}")
+                    filepath = os.path.join(root, filename)
+                    try:
+                        points = self.load_gpx_file(filepath)
+                        if points:
+                            self.activities.append({
+                                'filename': filename,
+                                'points': points,
+                                'date': filename.split('_')[0]  # Assuming date is in filename
+                            })
+                    except Exception as e:
+                        print(f"Error loading {filename}: {e}")
+                    
+        print(f"Loaded {len(self.activities)} {activity_type} activities from {gpx_dir}")
         
     def process_activities(self):
         """Process all activities and determine which street segments have been covered"""
@@ -282,7 +291,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:
         gpx_dir = sys.argv[1]
     else:
-        gpx_dir = 'strava_activities'  # Default directory
+        gpx_dir = 'strava_runs'  # Default directory
     
     city_name = "Somerville, Massachusetts, USA"
     print(f"Analyzing street coverage for {city_name}")

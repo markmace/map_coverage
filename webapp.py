@@ -36,7 +36,8 @@ async def home(request: Request):
 @app.post("/analyze", response_model=CoverageResponse)
 async def analyze_coverage(
     city_name: str = Form(...),
-    gpx_dir: str = Form("strava_activities"),
+    activity_type: str = Form("Run"),
+    gpx_dir: str = Form("strava_runs"),
     show_gps: bool = Form(False),
     show_streets: bool = Form(True)
 ):
@@ -50,15 +51,15 @@ async def analyze_coverage(
         # Load city streets
         tracker.load_city_streets(network_type="drive")
         # Load GPX files from the specified directory
-        tracker.load_gpx_directory(gpx_dir)
+        tracker.load_gpx_directory(gpx_dir, activity_type=activity_type)
         if len(tracker.activities) == 0:
             raise HTTPException(status_code=400, detail="No valid GPX files found in directory")
         # Process activities
         tracker.process_activities()
         # Generate outputs
         safe_city = city_name.replace(' ', '_').replace(',', '_')
-        map_filename = f"coverage_map_{safe_city}.html"
-        stats_filename = f"coverage_stats_{safe_city}.json"
+        map_filename = f"coverage_map_{safe_city}_{activity_type}.html"
+        stats_filename = f"coverage_stats_{safe_city}_{activity_type}.json"
         tracker.create_map(f"static/{map_filename}", show_gps=show_gps, show_streets=show_streets)
         tracker.export_statistics(f"static/{stats_filename}")
         # Calculate coverage
