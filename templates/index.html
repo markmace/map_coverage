@@ -76,23 +76,6 @@
                     <p class="text-sm text-gray-500 mt-1">Path to your GPX files (default: strava_runs)</p>
                 </div>
 
-                <!-- Visualization Options -->
-                <div class="space-y-3">
-                    <label class="block text-sm font-medium text-gray-700 mb-2">
-                        Map Options
-                    </label>
-                    <div class="space-y-2">
-                        <label class="flex items-center">
-                            <input type="checkbox" id="show_gps" name="show_gps" class="rounded border-gray-300 text-strava focus:ring-strava">
-                            <span class="ml-2 text-sm text-gray-700">Show GPS tracks (faint lines)</span>
-                        </label>
-                        <label class="flex items-center">
-                            <input type="checkbox" id="show_streets" name="show_streets" checked class="rounded border-gray-300 text-strava focus:ring-strava">
-                            <span class="ml-2 text-sm text-gray-700">Show street coverage (colored streets)</span>
-                        </label>
-                    </div>
-                </div>
-
                 <!-- Submit Button -->
                 <button 
                     type="submit" 
@@ -113,16 +96,23 @@
         </div>
 
         <!-- Results -->
-        <div id="results" class="hidden max-w-4xl mx-auto">
+        <div id="results" class="hidden max-w-6xl mx-auto">
             <div class="bg-white rounded-lg shadow-md p-6 mb-8">
                 <h2 class="text-2xl font-bold text-gray-900 mb-4">Coverage Results</h2>
                 <div id="stats" class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                     <!-- Stats will be populated here -->
                 </div>
+                
+                <!-- Embedded Map -->
+                <div class="mb-6">
+                    <h3 class="text-lg font-medium text-gray-900 mb-3">Interactive Coverage Map</h3>
+                    <div class="border rounded-lg overflow-hidden" style="height: 600px;">
+                        <iframe id="mapFrame" src="" width="100%" height="100%" frameborder="0"></iframe>
+                    </div>
+                    <p class="text-sm text-gray-500 mt-2">Use the layer controls in the top-right of the map to toggle different views</p>
+                </div>
+                
                 <div class="space-y-4">
-                    <a id="mapLink" href="#" target="_blank" class="block w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 text-center transition-colors">
-                        View Interactive Map
-                    </a>
                     <a id="statsLink" href="#" target="_blank" class="block w-full bg-gray-600 text-white py-3 px-4 rounded-md hover:bg-gray-700 text-center transition-colors">
                         Download Statistics (JSON)
                     </a>
@@ -157,8 +147,6 @@
             formData.append('city_name', document.getElementById('city_name').value);
             formData.append('activity_type', document.getElementById('activity_type').value);
             formData.append('gpx_dir', document.getElementById('gpx_dir').value);
-            formData.append('show_gps', document.getElementById('show_gps').checked);
-            formData.append('show_streets', document.getElementById('show_streets').checked);
             
             // Show loading
             document.getElementById('loading').classList.remove('hidden');
@@ -194,8 +182,8 @@
                     </div>
                 `;
                 
-                // Set links
-                document.getElementById('mapLink').href = result.map_url;
+                // Set map source and stats link
+                document.getElementById('mapFrame').src = result.map_url;
                 document.getElementById('statsLink').href = result.stats_url;
                 
                 // Show results

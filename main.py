@@ -185,7 +185,7 @@ class StravaStreetCoverageTracker:
         coverage_pct = (len(self.covered_segments) / total_segments) * 100
         print(f"\nCoverage: {len(self.covered_segments)}/{total_segments} street segments ({coverage_pct:.1f}%)")
         
-    def create_map(self, save_path='coverage_map.html', show_gps=True, show_streets=True):
+    def create_map(self, save_path='coverage_map.html'):
         """Create an interactive map showing street coverage"""
         if self.street_segments is None:
             raise ValueError("Process activities first")
@@ -196,6 +196,12 @@ class StravaStreetCoverageTracker:
         
         # Create base map
         m = folium.Map(location=center, zoom_start=13)
+        
+        # Create feature groups for layer control
+        gps_layer = folium.FeatureGroup(name="GPS Tracks (Orange Dashed)", show=True)
+        covered_streets_layer = folium.FeatureGroup(name="Covered Streets (Green)", show=True)
+        uncovered_streets_layer = folium.FeatureGroup(name="Uncovered Streets (Red)", show=True)
+        boundary_layer = folium.FeatureGroup(name="City Boundary", show=True)
         
         # Add city boundary if available
         if self.city_boundary and hasattr(self.city_boundary, 'exterior'):
@@ -208,40 +214,50 @@ class StravaStreetCoverageTracker:
                 fill=False,
                 opacity=0.8,
                 popup=f"City Boundary: {self.city_name}"
-            ).add_to(m)
+            ).add_to(boundary_layer)
         
-        # Add GPS tracks if requested
-        if show_gps:
-            for activity in self.activities:
-                if len(activity['points']) >= 2:
-                    # Convert coordinates for folium (lat, lon)
-                    track_coords = [[lat, lon] for lon, lat in activity['points']]
-                    folium.PolyLine(
-                        locations=track_coords,
-                        color='#3498db',  # Blue for GPS tracks
-                        weight=2,
-                        opacity=0.3,
-                        popup=f"Activity: {activity['filename']}"
-                    ).add_to(m)
-        
-        # Add street segments if requested
-        if show_streets:
-            for idx, segment in self.street_segments.iterrows():
-                if segment['segment_id'] in self.covered_segments:
-                    color = '#2ecc71'  # Green for covered
-                    weight = 3
-                    opacity = 0.8
-                else:
-                    color = '#e74c3c'  # Red for uncovered
-                    weight = 1
-                    opacity = 0.4
-                    
+        # Add GPS tracks
+        for activity in self.activities:
+            if len(activity['points']) >= 2:
+                # Convert coordinates for folium (lat, lon)
+                track_coords = [[lat, lon] for lon, lat in activity['points']]
                 folium.PolyLine(
-                    locations=[[lat, lon] for lon, lat in segment.geometry.coords],
-                    color=color,
-                    weight=weight,
-                    opacity=opacity
-                ).add_to(m)
+                    locations=track_coords,
+                    color='#FF6B35',  # Orange for GPS tracks
+                    weight=3,
+                    opacity=0.6,
+                    popup=f"Activity: {activity['filename']}",
+                    dash_array='5, 10'  # Dashed line to distinguish from streets
+                ).add_to(gps_layer)
+        
+        # Add street segments
+        for idx, segment in self.street_segments.iterrows():
+            if segment['segment_id'] in self.covered_segments:
+                color = '#2ecc71'  # Green for covered
+                weight = 3
+                opacity = 0.8
+                layer = covered_streets_layer
+            else:
+                color = '#e74c3c'  # Red for uncovered
+                weight = 1
+                opacity = 0.4
+                layer = uncovered_streets_layer
+                
+            folium.PolyLine(
+                locations=[[lat, lon] for lon, lat in segment.geometry.coords],
+                color=color,
+                weight=weight,
+                opacity=opacity
+            ).add_to(layer)
+        
+        # Add all layers to map
+        boundary_layer.add_to(m)
+        gps_layer.add_to(m)
+        covered_streets_layer.add_to(m)
+        uncovered_streets_layer.add_to(m)
+        
+        # Add layer control
+        folium.LayerControl().add_to(m)
             
         # Add coverage statistics
         total = len(self.street_segments)
@@ -250,12 +266,12 @@ class StravaStreetCoverageTracker:
         
         stats_html = f'''
         <div style="position: fixed; top: 10px; right: 10px; z-index: 1000; 
-                    background-color: white; padding: 10px; border-radius: 5px; 
-                    box-shadow: 0 2px 5px rgba(0,0,0,0.3);">
-            <h4>Coverage Statistics</h4>
-            <p><strong>Covered:</strong> {covered}/{total} street segments</p>
-            <p><strong>Percentage:</strong> {pct:.1f}%</p>
-            <p><strong>Activities:</strong> {len(self.activities)}</p>
+                    background-color: white; padding: 15px; border-radius: 8px; 
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.3); min-width: 250px;">
+            <h4 style="margin: 0 0 10px 0; color: #333;">Coverage Statistics</h4>
+            <p style="margin: 5px 0;"><strong>Covered:</strong> {covered}/{total} street segments</p>
+            <p style="margin: 5px 0;"><strong>Percentage:</strong> {pct:.1f}%</p>
+            <p style="margin: 5px 0;"><strong>Activities:</strong> {len(self.activities)}</p>
         </div>
         '''
         m.get_root().html.add_child(folium.Element(stats_html))

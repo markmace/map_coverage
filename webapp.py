@@ -37,9 +37,7 @@ async def home(request: Request):
 async def analyze_coverage(
     city_name: str = Form(...),
     activity_type: str = Form("Run"),
-    gpx_dir: str = Form("strava_runs"),
-    show_gps: bool = Form(False),
-    show_streets: bool = Form(True)
+    gpx_dir: str = Form("strava_runs")
 ):
     """Analyze street coverage from a directory of GPX files"""
     
@@ -60,7 +58,7 @@ async def analyze_coverage(
         safe_city = city_name.replace(' ', '_').replace(',', '_')
         map_filename = f"coverage_map_{safe_city}_{activity_type}.html"
         stats_filename = f"coverage_stats_{safe_city}_{activity_type}.json"
-        tracker.create_map(f"static/{map_filename}", show_gps=show_gps, show_streets=show_streets)
+        tracker.create_map(f"static/{map_filename}")
         tracker.export_statistics(f"static/{stats_filename}")
         # Calculate coverage
         total_segments = len(tracker.street_segments)
