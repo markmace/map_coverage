@@ -1,0 +1,20 @@
+[project]
+name = "map-coverage"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "gpxpy",
+    "geopandas",
+    "osmnx",
+    "folium",
+    "shapely",
+    "pandas",
+    "requests",
+    "numpy",
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "jinja2",
+]
