@@ -194,8 +194,21 @@ class StravaStreetCoverageTracker:
         bounds = self.street_segments.total_bounds
         center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
         
-        # Create base map
-        m = folium.Map(location=center, zoom_start=13)
+        # Create base map with zoom controls in bottom-left
+        m = folium.Map(location=center, zoom_start=13, zoom_control=True)
+        
+        # Move zoom controls to bottom-left
+        m.get_root().html.add_child(folium.Element("""
+        <style>
+        .leaflet-control-zoom {
+            position: absolute !important;
+            bottom: 20px !important;
+            left: 10px !important;
+            top: auto !important;
+            right: auto !important;
+        }
+        </style>
+        """))
         
         # Create feature groups for layer control
         gps_layer = folium.FeatureGroup(name="GPS Tracks (Orange Dashed)", show=True)
