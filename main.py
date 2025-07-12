@@ -265,7 +265,7 @@ class StravaStreetCoverageTracker:
         pct = (covered / total) * 100
         
         stats_html = f'''
-        <div style="position: fixed; top: 10px; right: 10px; z-index: 1000; 
+        <div style="position: fixed; top: 10px; left: 10px; z-index: 1000; 
                     background-color: white; padding: 15px; border-radius: 8px; 
                     box-shadow: 0 4px 12px rgba(0,0,0,0.3); min-width: 250px;">
             <h4 style="margin: 0 0 10px 0; color: #333;">Coverage Statistics</h4>
