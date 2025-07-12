@@ -17,4 +17,5 @@ dependencies = [
     "uvicorn[standard]",
     "python-multipart",
     "jinja2",
+    "geopy",
 ]

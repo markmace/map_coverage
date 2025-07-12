@@ -1,0 +1,47 @@
+API_KEYS.json
+.env
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+Thumbs.db
+
+# Logs
+*.log
+
+# Coverage maps
+coverage_map.html
+my_city_coverage.html
+
+# Statistics
+coverage_stats.json
+
+# Strava credentials and tokens
+strava_credentials.json
+strava_access_tokens.json
+
+# cache
+cache/
+
+# strava activities
+strava_runs/
+strava_activities/
+
+uv.lock

@@ -1,17 +1,11 @@
 import os
-import tempfile
-import zipfile
-from pathlib import Path
-from typing import List, Optional
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi import FastAPI, HTTPException, Form, Request
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 import uvicorn
 from main import StravaStreetCoverageTracker
-import json
-from fastapi import Request
 
 app = FastAPI(title="Street Coverage Tracker", description="Track your running coverage across city streets")
 
@@ -25,15 +19,10 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Templates
 templates = Jinja2Templates(directory="templates")
 
-class CoverageRequest(BaseModel):
-    city_name: str
-    buffer_distance: int = 20
-    network_type: str = "drive"
-
 class CoverageResponse(BaseModel):
     city_name: str
-    total_streets: int
-    covered_streets: int
+    total_segments: int
+    covered_segments: int
     coverage_percentage: float
     total_activities: int
     map_url: str
@@ -41,91 +30,54 @@ class CoverageResponse(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    """Main page with city selection and file upload"""
+    """Main page with city selection"""
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.post("/analyze", response_model=CoverageResponse)
 async def analyze_coverage(
     city_name: str = Form(...),
-    buffer_distance: int = Form(20),
-    network_type: str = Form("drive"),
-    files: List[UploadFile] = File(...)
+    gpx_dir: str = Form("strava_activities"),
+    show_gps: bool = Form(False),
+    show_streets: bool = Form(True)
 ):
-    """Analyze street coverage from uploaded GPX files"""
+    """Analyze street coverage from a directory of GPX files"""
     
-    if not files:
-        raise HTTPException(status_code=400, detail="No files uploaded")
+    if not os.path.exists(gpx_dir) or not os.path.isdir(gpx_dir):
+        raise HTTPException(status_code=400, detail=f"Directory not found: {gpx_dir}")
     
-    # Create temporary directory for uploaded files
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
-        
-        # Save uploaded files
-        for file in files:
-            if not file.filename.endswith('.gpx'):
-                continue
-                
-            file_path = temp_path / file.filename
-            with open(file_path, "wb") as buffer:
-                content = await file.read()
-                buffer.write(content)
-        
-        # Initialize tracker
-        tracker = StravaStreetCoverageTracker(city_name, buffer_distance=buffer_distance)
-        
-        try:
-            # Load city streets
-            tracker.load_city_streets(network_type=network_type)
-            
-            # Load GPX files from temp directory
-            tracker.load_gpx_directory(str(temp_path))
-            
-            if len(tracker.activities) == 0:
-                raise HTTPException(status_code=400, detail="No valid GPX files found")
-            
-            # Process activities
-            tracker.process_activities()
-            
-            # Generate outputs
-            map_filename = f"coverage_map_{city_name.replace(' ', '_').replace(',', '_')}.html"
-            stats_filename = f"coverage_stats_{city_name.replace(' ', '_').replace(',', '_')}.json"
-            
-            tracker.create_map(f"static/{map_filename}")
-            tracker.export_statistics(f"static/{stats_filename}")
-            
-            # Calculate coverage
-            total_streets = len(tracker.streets)
-            covered_streets = len(tracker.covered_streets)
-            coverage_percentage = (covered_streets / total_streets) * 100 if total_streets > 0 else 0
-            
-            return CoverageResponse(
-                city_name=city_name,
-                total_streets=total_streets,
-                covered_streets=covered_streets,
-                coverage_percentage=coverage_percentage,
-                total_activities=len(tracker.activities),
-                map_url=f"/static/{map_filename}",
-                stats_url=f"/static/{stats_filename}"
-            )
-            
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
-
-@app.get("/map/{filename}")
-async def get_map(filename: str):
-    """Serve generated map files"""
-    file_path = f"static/{filename}"
-    if os.path.exists(file_path):
-        return FileResponse(file_path)
-    raise HTTPException(status_code=404, detail="Map file not found")
-
-@app.get("/stats/{filename}")
-async def get_stats(filename: str):
-    """Serve generated stats files"""
-    file_path = f"static/{filename}"
-    if os.path.exists(file_path):
-        return FileResponse(file_path, media_type="application/json")
-    raise HTTPException(status_code=404, detail="Stats file not found")
+    tracker = StravaStreetCoverageTracker(city_name, buffer_distance=20)
+    try:
+        # Load city streets
+        tracker.load_city_streets(network_type="drive")
+        # Load GPX files from the specified directory
+        tracker.load_gpx_directory(gpx_dir)
+        if len(tracker.activities) == 0:
+            raise HTTPException(status_code=400, detail="No valid GPX files found in directory")
+        # Process activities
+        tracker.process_activities()
+        # Generate outputs
+        safe_city = city_name.replace(' ', '_').replace(',', '_')
+        map_filename = f"coverage_map_{safe_city}.html"
+        stats_filename = f"coverage_stats_{safe_city}.json"
+        tracker.create_map(f"static/{map_filename}", show_gps=show_gps, show_streets=show_streets)
+        tracker.export_statistics(f"static/{stats_filename}")
+        # Calculate coverage
+        total_segments = len(tracker.street_segments)
+        covered_segments = len(tracker.covered_segments)
+        coverage_percentage = (covered_segments / total_segments) * 100 if total_segments > 0 else 0
+        return CoverageResponse(
+            city_name=city_name,
+            total_segments=total_segments,
+            covered_segments=covered_segments,
+            coverage_percentage=coverage_percentage,
+            total_activities=len(tracker.activities),
+            map_url=f"/static/{map_filename}",
+            stats_url=f"/static/{stats_filename}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000) 

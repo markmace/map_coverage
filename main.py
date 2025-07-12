@@ -2,10 +2,9 @@ import os
 import gpxpy
 import pandas as pd
 import geopandas as gpd
-from shapely.geometry import Point, LineString
+from shapely.geometry import LineString
 import osmnx as ox
 import folium
-from folium import plugins
 import numpy as np
 from datetime import datetime
 import json
@@ -22,8 +21,10 @@ class StravaStreetCoverageTracker:
         self.city_name = city_name
         self.buffer_distance = buffer_distance
         self.streets = None
-        self.covered_streets = set()
+        self.street_segments = None
+        self.covered_segments = set()
         self.activities = []
+        self.city_boundary = None
         
     def load_city_streets(self, network_type='drive'):
         """
@@ -43,7 +44,71 @@ class StravaStreetCoverageTracker:
         # Add unique ID to each street segment
         self.streets['street_id'] = range(len(self.streets))
         
+        # Split streets into smaller segments at intersections
+        self._split_streets_into_segments()
+        
+        # Get city boundary
+        self._get_city_boundary()
+        
         print(f"Loaded {len(self.streets)} street segments")
+        print(f"Created {len(self.street_segments)} smaller segments")
+        
+    def _split_streets_into_segments(self):
+        """Split streets into smaller segments for more granular coverage tracking"""
+        segments = []
+        segment_id = 0
+        
+        for idx, street in self.streets.iterrows():
+            # Get the street geometry
+            geom = street.geometry
+            
+            # Split the line into smaller segments (every ~100 meters)
+            if geom.length > 0.001:  # Roughly 100 meters in degrees
+                # Create points along the line
+                distances = np.linspace(0, geom.length, max(2, int(geom.length / 0.001)))
+                points = [geom.interpolate(d) for d in distances]
+                
+                # Create segments between consecutive points
+                for i in range(len(points) - 1):
+                    segment_geom = LineString([points[i], points[i + 1]])
+                    segments.append({
+                        'segment_id': segment_id,
+                        'street_id': street['street_id'],
+                        'geometry': segment_geom,
+                        'length': segment_geom.length,
+                        'original_street': street
+                    })
+                    segment_id += 1
+            else:
+                # Keep original street if it's too short
+                segments.append({
+                    'segment_id': segment_id,
+                    'street_id': street['street_id'],
+                    'geometry': geom,
+                    'length': geom.length,
+                    'original_street': street
+                })
+                segment_id += 1
+        
+        self.street_segments = gpd.GeoDataFrame(segments, crs=self.streets.crs)
+        
+    def _get_city_boundary(self):
+        """Get the city boundary for visualization"""
+        try:
+            from geopy.geocoders import Nominatim
+            
+            geolocator = Nominatim(user_agent="street_coverage_tracker")
+            location = geolocator.geocode(self.city_name)
+            
+            if location:
+                # Get the boundary using OSMnx
+                boundary = ox.geocoder.geocode_to_gdf(self.city_name)
+                if not boundary.empty:
+                    self.city_boundary = boundary.geometry.iloc[0]
+                    print(f"Loaded city boundary for {self.city_name}")
+        except Exception as e:
+            print(f"Could not load city boundary: {e}")
+            self.city_boundary = None
         
     def load_gpx_file(self, filepath):
         """Load a single GPX file and extract coordinates"""
@@ -57,31 +122,6 @@ class StravaStreetCoverageTracker:
                     points.append((point.longitude, point.latitude))
                     
         return points
-    
-    def load_strava_export(self, export_dir):
-        """
-        Load activities from Strava data export
-        
-        Args:
-            export_dir: Directory containing exported Strava data
-        """
-        activities_dir = os.path.join(export_dir, 'activities')
-        
-        for filename in os.listdir(activities_dir):
-            if filename.endswith('.gpx'):
-                filepath = os.path.join(activities_dir, filename)
-                try:
-                    points = self.load_gpx_file(filepath)
-                    if points:
-                        self.activities.append({
-                            'filename': filename,
-                            'points': points,
-                            'date': filename.split('_')[0]  # Assuming date is in filename
-                        })
-                except Exception as e:
-                    print(f"Error loading {filename}: {e}")
-                    
-        print(f"Loaded {len(self.activities)} activities")
         
     def load_gpx_directory(self, gpx_dir):
         """
@@ -111,11 +151,11 @@ class StravaStreetCoverageTracker:
         print(f"Loaded {len(self.activities)} activities from {gpx_dir}")
         
     def process_activities(self):
-        """Process all activities and determine which streets have been covered"""
-        if self.streets is None:
+        """Process all activities and determine which street segments have been covered"""
+        if self.street_segments is None:
             raise ValueError("Load city streets first using load_city_streets()")
             
-        total_streets = len(self.streets)
+        total_segments = len(self.street_segments)
         
         for activity in self.activities:
             # Create LineString from GPS points
@@ -127,48 +167,76 @@ class StravaStreetCoverageTracker:
             # Buffer the line to account for GPS inaccuracy
             buffered_line = line.buffer(self.buffer_distance / 111000)  # Convert meters to degrees (rough)
             
-            # Find intersecting streets
-            intersecting = self.streets[self.streets.intersects(buffered_line)]
+            # Find intersecting street segments
+            intersecting = self.street_segments[self.street_segments.intersects(buffered_line)]
             
-            # Add to covered streets
-            self.covered_streets.update(intersecting['street_id'].values)
+            # Add to covered segments
+            self.covered_segments.update(intersecting['segment_id'].values)
             
-        coverage_pct = (len(self.covered_streets) / total_streets) * 100
-        print(f"\nCoverage: {len(self.covered_streets)}/{total_streets} streets ({coverage_pct:.1f}%)")
+        coverage_pct = (len(self.covered_segments) / total_segments) * 100
+        print(f"\nCoverage: {len(self.covered_segments)}/{total_segments} street segments ({coverage_pct:.1f}%)")
         
-    def create_map(self, save_path='coverage_map.html'):
+    def create_map(self, save_path='coverage_map.html', show_gps=True, show_streets=True):
         """Create an interactive map showing street coverage"""
-        if self.streets is None:
+        if self.street_segments is None:
             raise ValueError("Process activities first")
             
         # Get map center
-        bounds = self.streets.total_bounds
+        bounds = self.street_segments.total_bounds
         center = [(bounds[1] + bounds[3]) / 2, (bounds[0] + bounds[2]) / 2]
         
         # Create base map
         m = folium.Map(location=center, zoom_start=13)
         
-        # Add streets
-        for idx, street in self.streets.iterrows():
-            if street['street_id'] in self.covered_streets:
-                color = '#2ecc71'  # Green for covered
-                weight = 4
-                opacity = 0.8
-            else:
-                color = '#e74c3c'  # Red for uncovered
-                weight = 2
-                opacity = 0.5
-                
-            folium.PolyLine(
-                locations=[[lat, lon] for lon, lat in street.geometry.coords],
-                color=color,
-                weight=weight,
-                opacity=opacity
+        # Add city boundary if available
+        if self.city_boundary and hasattr(self.city_boundary, 'exterior'):
+            # Convert boundary to coordinates
+            coords = [[lat, lon] for lon, lat in self.city_boundary.exterior.coords]
+            folium.Polygon(
+                locations=coords,
+                color='#34495e',
+                weight=2,
+                fill=False,
+                opacity=0.8,
+                popup=f"City Boundary: {self.city_name}"
             ).add_to(m)
+        
+        # Add GPS tracks if requested
+        if show_gps:
+            for activity in self.activities:
+                if len(activity['points']) >= 2:
+                    # Convert coordinates for folium (lat, lon)
+                    track_coords = [[lat, lon] for lon, lat in activity['points']]
+                    folium.PolyLine(
+                        locations=track_coords,
+                        color='#3498db',  # Blue for GPS tracks
+                        weight=2,
+                        opacity=0.3,
+                        popup=f"Activity: {activity['filename']}"
+                    ).add_to(m)
+        
+        # Add street segments if requested
+        if show_streets:
+            for idx, segment in self.street_segments.iterrows():
+                if segment['segment_id'] in self.covered_segments:
+                    color = '#2ecc71'  # Green for covered
+                    weight = 3
+                    opacity = 0.8
+                else:
+                    color = '#e74c3c'  # Red for uncovered
+                    weight = 1
+                    opacity = 0.4
+                    
+                folium.PolyLine(
+                    locations=[[lat, lon] for lon, lat in segment.geometry.coords],
+                    color=color,
+                    weight=weight,
+                    opacity=opacity
+                ).add_to(m)
             
         # Add coverage statistics
-        total = len(self.streets)
-        covered = len(self.covered_streets)
+        total = len(self.street_segments)
+        covered = len(self.covered_segments)
         pct = (covered / total) * 100
         
         stats_html = f'''
@@ -176,8 +244,9 @@ class StravaStreetCoverageTracker:
                     background-color: white; padding: 10px; border-radius: 5px; 
                     box-shadow: 0 2px 5px rgba(0,0,0,0.3);">
             <h4>Coverage Statistics</h4>
-            <p><strong>Covered:</strong> {covered}/{total} streets</p>
+            <p><strong>Covered:</strong> {covered}/{total} street segments</p>
             <p><strong>Percentage:</strong> {pct:.1f}%</p>
+            <p><strong>Activities:</strong> {len(self.activities)}</p>
         </div>
         '''
         m.get_root().html.add_child(folium.Element(stats_html))
@@ -191,8 +260,9 @@ class StravaStreetCoverageTracker:
         stats = {
             'city': self.city_name,
             'total_streets': len(self.streets),
-            'covered_streets': len(self.covered_streets),
-            'coverage_percentage': (len(self.covered_streets) / len(self.streets)) * 100,
+            'total_segments': len(self.street_segments),
+            'covered_segments': len(self.covered_segments),
+            'coverage_percentage': (len(self.covered_segments) / len(self.street_segments)) * 100,
             'total_activities': len(self.activities),
             'buffer_distance_meters': self.buffer_distance,
             'timestamp': datetime.now().isoformat()
@@ -202,20 +272,6 @@ class StravaStreetCoverageTracker:
             json.dump(stats, f, indent=2)
             
         print(f"Statistics saved to {save_path}")
-        
-    def get_uncovered_streets_nearby(self, radius_km=1):
-        """Find uncovered streets within a certain radius of covered streets"""
-        # This helps identify good areas to explore next
-        uncovered = self.streets[~self.streets['street_id'].isin(self.covered_streets)]
-        
-        # Create buffer around covered streets
-        covered_streets_geom = self.streets[self.streets['street_id'].isin(self.covered_streets)]
-        covered_buffer = covered_streets_geom.unary_union.buffer(radius_km / 111)  # Convert km to degrees
-        
-        # Find uncovered streets within buffer
-        nearby_uncovered = uncovered[uncovered.intersects(covered_buffer)]
-        
-        return nearby_uncovered
 
 
 # Example usage
@@ -254,7 +310,3 @@ if __name__ == "__main__":
     
     # Export statistics
     tracker.export_statistics()
-    
-    # Find areas to explore
-    nearby = tracker.get_uncovered_streets_nearby(radius_km=0.5)
-    print(f"Found {len(nearby)} uncovered streets within 0.5km of covered areas")
