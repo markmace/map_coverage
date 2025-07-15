@@ -79,6 +79,7 @@
                 <!-- Submit Button -->
                 <button 
                     type="submit" 
+                    id="submitBtn"
                     class="w-full bg-strava text-white py-3 px-4 rounded-md hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-strava focus:ring-offset-2 transition-colors"
                 >
                     Analyze Coverage
@@ -86,12 +87,24 @@
             </form>
         </div>
 
-        <!-- Loading State -->
-        <div id="loading" class="hidden max-w-2xl mx-auto bg-white rounded-lg shadow-md p-6 mb-8">
+        <!-- Progress State -->
+        <div id="progress" class="hidden max-w-2xl mx-auto bg-white rounded-lg shadow-md p-6 mb-8">
             <div class="text-center">
                 <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-strava mx-auto mb-4"></div>
-                <h3 class="text-lg font-medium text-gray-900 mb-2">Analyzing your coverage...</h3>
-                <p class="text-gray-600">This may take a few minutes depending on the city size and number of activities.</p>
+                <h3 class="text-lg font-medium text-gray-900 mb-2" id="progressTitle">Analyzing your coverage...</h3>
+                <p class="text-gray-600 mb-4" id="progressMessage">This may take a few minutes depending on the city size and number of activities.</p>
+                
+                <!-- Progress Bar -->
+                <div class="w-full bg-gray-200 rounded-full h-3 mb-4">
+                    <div id="progressBar" class="bg-strava h-3 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                
+                <!-- Progress Details -->
+                <div id="progressDetails" class="text-sm text-gray-500">
+                    <div id="stageInfo" class="mb-2"></div>
+                    <div id="countInfo" class="mb-2"></div>
+                    <div id="percentageInfo"></div>
+                </div>
             </div>
         </div>
 
@@ -139,6 +152,100 @@
     </div>
 
     <script>
+        let websocket = null;
+        let currentStage = '';
+        let totalProgress = 0;
+        let currentProgress = 0;
+
+        // WebSocket connection
+        function connectWebSocket() {
+            websocket = new WebSocket(`ws://${window.location.host}/ws`);
+            
+            websocket.onopen = function(event) {
+                console.log('WebSocket connected');
+            };
+            
+            websocket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                updateProgress(data);
+            };
+            
+            websocket.onclose = function(event) {
+                console.log('WebSocket disconnected');
+            };
+            
+            websocket.onerror = function(error) {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        // Update progress display
+        function updateProgress(data) {
+            const { stage, current, total, percentage, message } = data;
+            
+            // Update progress bar
+            const progressBar = document.getElementById('progressBar');
+            const progressTitle = document.getElementById('progressTitle');
+            const progressMessage = document.getElementById('progressMessage');
+            const stageInfo = document.getElementById('stageInfo');
+            const countInfo = document.getElementById('countInfo');
+            const percentageInfo = document.getElementById('percentageInfo');
+            
+            // Update stage-specific information
+            let stageTitle = '';
+            let stageDescription = '';
+            
+            switch(stage) {
+                case 'loading_streets':
+                    stageTitle = 'Loading City Streets';
+                    stageDescription = 'Downloading and processing street network data...';
+                    break;
+                case 'loading_activities':
+                    stageTitle = 'Loading Activities';
+                    stageDescription = 'Reading and parsing GPX files...';
+                    break;
+                case 'processing_activities':
+                    stageTitle = 'Processing Activities';
+                    stageDescription = 'Analyzing GPS tracks against street segments...';
+                    break;
+                case 'generating_outputs':
+                    stageTitle = 'Generating Outputs';
+                    stageDescription = 'Creating maps and statistics...';
+                    break;
+                case 'error':
+                    stageTitle = 'Error';
+                    stageDescription = message;
+                    break;
+                default:
+                    stageTitle = 'Processing';
+                    stageDescription = message || 'Processing your data...';
+            }
+            
+            progressTitle.textContent = stageTitle;
+            progressMessage.textContent = stageDescription;
+            
+            // Update progress bar
+            progressBar.style.width = `${percentage}%`;
+            
+            // Update detailed progress info
+            if (total > 0) {
+                stageInfo.textContent = `Stage: ${stageTitle}`;
+                countInfo.textContent = `Progress: ${current} / ${total}`;
+                percentageInfo.textContent = `Completion: ${percentage.toFixed(1)}%`;
+            } else {
+                stageInfo.textContent = `Stage: ${stageTitle}`;
+                countInfo.textContent = '';
+                percentageInfo.textContent = message;
+            }
+            
+            // If we're done, hide progress and show results
+            if (stage === 'generating_outputs' && current === total && total > 0) {
+                setTimeout(() => {
+                    document.getElementById('progress').classList.add('hidden');
+                }, 1000);
+            }
+        }
+
         // Form submission
         document.getElementById('coverageForm').addEventListener('submit', async function(e) {
             e.preventDefault();
@@ -148,10 +255,18 @@
             formData.append('activity_type', document.getElementById('activity_type').value);
             formData.append('gpx_dir', document.getElementById('gpx_dir').value);
             
-            // Show loading
-            document.getElementById('loading').classList.remove('hidden');
+            // Connect WebSocket for progress updates
+            connectWebSocket();
+            
+            // Show progress
+            document.getElementById('progress').classList.remove('hidden');
             document.getElementById('results').classList.add('hidden');
             document.getElementById('error').classList.add('hidden');
+            
+            // Disable submit button
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Analyzing...';
             
             try {
                 const response = await fetch('/analyze', {
@@ -174,7 +289,7 @@
                     </div>
                     <div class="bg-green-50 p-4 rounded-lg">
                         <h3 class="font-medium text-green-900">Covered Segments</h3>
-                        <p class="text-2xl font-bold text-green-600">${(result.covered_segments || 0).toLocaleString()}</p>
+                        <p class="text-2xl font-bold text-green-600">${(result.completed_segments || 0).toLocaleString()}</p>
                     </div>
                     <div class="bg-purple-50 p-4 rounded-lg">
                         <h3 class="font-medium text-purple-900">Coverage</h3>
@@ -193,7 +308,14 @@
                 document.getElementById('errorMessage').textContent = error.message;
                 document.getElementById('error').classList.remove('hidden');
             } finally {
-                document.getElementById('loading').classList.add('hidden');
+                // Re-enable submit button
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Analyze Coverage';
+                
+                // Close WebSocket
+                if (websocket) {
+                    websocket.close();
+                }
             }
         });
     </script>

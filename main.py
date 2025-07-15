@@ -14,27 +14,26 @@ import multiprocessing as mp
 from functools import partial
 
 class CoverageConfig:
-    """Centralized configuration for street coverage tracking"""
+    """Centralized configuration for street coverage tracking - SIMPLIFIED"""
     
-    # GPS Quality Settings
-    MIN_GPS_ACCURACY = 25.0  # meters - filter out poor GPS data
+    # GPS Quality Settings - NO filtering
+    MIN_GPS_ACCURACY = 1000.0  # meters - essentially no filtering
     
-    # Street Segmentation Settings
-    MIN_SEGMENT_LENGTH = 50.0   # meters - minimum segment size
-    MAX_SEGMENT_LENGTH = 200.0  # meters - maximum segment size
+    # Street Segmentation Settings - SIMPLE fixed segments
+    MIN_SEGMENT_LENGTH = 100.0   # meters - fixed ~100m segments like original
+    MAX_SEGMENT_LENGTH = 100.0   # meters - fixed size
     
-    # Coverage Completion Settings
-    MIN_COVERAGE_RATIO = 0.7    # 70% coverage required to mark as completed
-    MIN_COVERAGE_THRESHOLD = 0.1  # minimum ratio to even consider tracking
+    # Coverage Completion Settings - VERY simple
+    MIN_COVERAGE_RATIO = 0.1     # 10% coverage required (very lenient)
+    MIN_COVERAGE_THRESHOLD = 0.01  # minimum ratio to even consider tracking
     
-    # Road Filtering Settings
+    # Road Filtering Settings - MINIMAL
     EXCLUDED_HIGHWAY_TYPES = {
-        'motorway', 'motorway_link', 'trunk', 'trunk_link',
-        'primary', 'primary_link', 'secondary', 'secondary_link'
+        'motorway', 'motorway_link'  # Only exclude major highways
     }
     
     # Map Visualization Settings
-    BUFFER_DISTANCE = 15  # meters - GPS buffer for intersection
+    BUFFER_DISTANCE = 20  # meters - original 20m buffer
     MAP_ZOOM_START = 13
     COMPLETED_COLOR = '#2ecc71'  # Green
     INCOMPLETED_COLOR = '#e74c3c'  # Red
@@ -68,25 +67,15 @@ class StreetSegment:
         
     @property
     def is_completed(self) -> bool:
-        """Smart completion logic"""
-        if not self.activities_covering:
-            return False
-            
-        # Check if we have good coverage (at least 70% of segment length)
-        if self.coverage_ratios:
-            max_coverage = max(self.coverage_ratios)
-            if max_coverage < CoverageConfig.MIN_COVERAGE_RATIO:
-                return False
-                
-        return True
+        """Simple binary completion logic"""
+        return len(self.activities_covering) > 0
     
     @property
     def completion_metadata(self) -> dict:
         return {
             'segment_id': self.segment_id,
             'is_completed': self.is_completed,
-            'activity_count': len(self.activities_covering),
-            'max_coverage_ratio': max(self.coverage_ratios) if self.coverage_ratios else 0.0
+            'activity_count': len(self.activities_covering)
         }
 
 class StravaStreetCoverageTracker:
@@ -273,17 +262,22 @@ class StravaStreetCoverageTracker:
         return points
         
     def _assess_gps_quality(self, points: List[GPSPoint]) -> List[GPSPoint]:
-        """Assess and filter GPS points based on quality metrics"""
+        """Assess and filter GPS points based on quality metrics - much more lenient"""
         if len(points) < 2:
             return points
             
         quality_points = []
         
         for point in points:
-            # Skip points with poor accuracy if available
+            # Only skip points with obviously bad accuracy (very high threshold)
             if point.accuracy and point.accuracy > self.min_gps_accuracy:
                 continue
             quality_points.append(point)
+            
+        # If we filtered out too many points, return original
+        if len(quality_points) < len(points) * 0.5:  # If we filtered out more than 50%
+            print(f"Warning: GPS filtering too aggressive, keeping all {len(points)} points")
+            return points
             
         return quality_points
         
@@ -306,6 +300,26 @@ class StravaStreetCoverageTracker:
             print(f"Directory {gpx_dir} not found!")
             return
             
+        # Get city bounds from loaded street network
+        if self.streets is None:
+            print("Warning: No street network loaded. Loading all activities without geographic filtering.")
+            city_bounds = None
+        else:
+            # Get bounds from the street network
+            bounds = self.streets.total_bounds  # (minx, miny, maxx, maxy)
+            # Add some buffer around the city (about 2km)
+            buffer_degrees = 0.02  # roughly 2km at this latitude
+            city_bounds = {
+                'min_lat': bounds[1] - buffer_degrees,
+                'max_lat': bounds[3] + buffer_degrees,
+                'min_lon': bounds[0] - buffer_degrees,
+                'max_lon': bounds[2] + buffer_degrees
+            }
+            print(f"City bounds: {city_bounds}")
+        
+        local_activities = 0
+        total_activities = 0
+        
         # Walk through directory and subdirectories
         for root, dirs, files in os.walk(gpx_dir):
             for filename in files:
@@ -320,15 +334,30 @@ class StravaStreetCoverageTracker:
                     try:
                         points = self.load_gpx_file(filepath)
                         if len(points) >= 2:
-                            self.activities.append({
-                                'filename': filename,
-                                'points': [(p.lon, p.lat) for p in points],
-                                'gps_points': points
-                            })
+                            total_activities += 1
+                            
+                            # Check if activity is in local area (if we have city bounds)
+                            is_local = True  # Default to True if no bounds
+                            if city_bounds:
+                                is_local = False
+                                for point in points:
+                                    if (city_bounds['min_lat'] <= point.lat <= city_bounds['max_lat'] and
+                                        city_bounds['min_lon'] <= point.lon <= city_bounds['max_lon']):
+                                        is_local = True
+                                        break
+                            
+                            if is_local:
+                                self.activities.append({
+                                    'filename': filename,
+                                    'points': [(p.lon, p.lat) for p in points],
+                                    'gps_points': points
+                                })
+                                local_activities += 1
                     except Exception as e:
                         print(f"Error loading {filename}: {e}")
                     
-        print(f"Loaded {len(self.activities)} {activity_type} activities from {gpx_dir}")
+        print(f"Found {total_activities} total {activity_type} activities")
+        print(f"Loaded {local_activities} local activities from {gpx_dir}")
         
     def _calculate_coverage_ratio(self, activity_points: List[GPSPoint], 
                                 street_segment: StreetSegment) -> float:
@@ -355,7 +384,7 @@ class StravaStreetCoverageTracker:
         return intersection_length / street_length
         
     def process_activities(self):
-        """Process all activities and determine which street segments have been completed"""
+        """Process all activities and determine which street segments have been completed - SIMPLIFIED"""
         if self.street_segments is None:
             raise ValueError("Load city streets first using load_city_streets()")
             
@@ -364,40 +393,35 @@ class StravaStreetCoverageTracker:
         
         print(f"Processing {total_activities} activities against {total_segments} street segments...")
         
-        # Pre-compute activity lines to avoid recreating them
-        activity_lines = []
-        for activity in self.activities:
-            if len(activity['gps_points']) >= 2:
-                activity_line = LineString([p.coords for p in activity['gps_points']])
-                activity_lines.append((activity_line, activity['filename']))
-            else:
-                activity_lines.append((None, activity['filename']))
-        
-        # Prepare all arguments for multiprocessing
-        args = []
-        for activity_line, filename in activity_lines:
-            if activity_line is not None:
-                for segment_id, segment in self.street_segment_objects.items():
-                    args.append((activity_line, segment, filename))
-        
-        print(f"Calculating {len(args)} coverage ratios using multiprocessing...")
-        
-        # Use a pool to process coverage ratios in parallel
-        with mp.Pool() as pool:
-            # Map the function to the arguments
-            results = pool.starmap(self._calculate_coverage_ratio_wrapper_with_line, args)
+        # SIMPLE processing - no complex filtering
+        coverage_found = 0
+        for i, activity in enumerate(self.activities):
+            if len(activity['gps_points']) < 2:
+                continue
+                
+            # Progress update every 100 activities
+            if i % 100 == 0:
+                print(f"Processing activity {i+1}/{total_activities}...")
+                
+            # Create activity line once
+            activity_line = LineString([p.coords for p in activity['gps_points']])
             
-            # Process results and update street segments
-            for segment_id, coverage_ratio, filename in results:
-                if coverage_ratio > CoverageConfig.MIN_COVERAGE_THRESHOLD:  # Minimum threshold for consideration
-                    # Add to coverage tracking
-                    self.street_segment_objects[segment_id].activities_covering.append(filename)
-                    self.street_segment_objects[segment_id].coverage_ratios.append(coverage_ratio)
-                    
-                    # Update completed segments set
-                    if self.street_segment_objects[segment_id].is_completed:
-                        self.covered_segments.add(segment_id)
+            # Simple intersection check with buffer
+            buffered_activity = activity_line.buffer(CoverageConfig.BUFFER_DISTANCE / 111000)
+            
+            # Check each street segment
+            for segment_id, street_segment in self.street_segment_objects.items():
+                if buffered_activity.intersects(street_segment.geometry):
+                    # Mark as covered (simple binary approach)
+                    if activity['filename'] not in street_segment.activities_covering:
+                        street_segment.activities_covering.append(activity['filename'])
+                        coverage_found += 1
+                        
+                        # Mark as completed if we have any coverage
+                        if street_segment.is_completed:
+                            self.covered_segments.add(segment_id)
         
+        print(f"Found {coverage_found} coverage matches")
         print("Processing complete!")
         
         # Calculate final statistics
@@ -407,24 +431,29 @@ class StravaStreetCoverageTracker:
         
         # Print quality metrics
         if completed_count > 0:
-            avg_coverage_ratio = np.mean([
-                max(s.coverage_ratios) for s in self.street_segment_objects.values() 
-                if s.is_completed
-            ])
-            print(f"Average coverage ratio for completed segments: {avg_coverage_ratio:.2f}")
-            
+            print(f"Success! Found {completed_count} completed segments out of {total_segments}")
+        else:
+            print("No segments completed.")
+        
     def _calculate_coverage_ratio_wrapper_with_line(self, activity_line: LineString, street_segment: StreetSegment, filename: str) -> Tuple[int, float, str]:
         """Wrapper function for multiprocessing coverage ratio calculation with pre-computed line"""
-        coverage_ratio = self._calculate_coverage_ratio_with_line(activity_line, street_segment)
-        return street_segment.segment_id, coverage_ratio, filename
+        try:
+            coverage_ratio = self._calculate_coverage_ratio_with_line(activity_line, street_segment)
+            return street_segment.segment_id, coverage_ratio, filename
+        except Exception as e:
+            print(f"Error in coverage calculation: {e}")
+            return street_segment.segment_id, 0.0, filename
         
     def _calculate_coverage_ratio_with_line(self, activity_line: LineString, street_segment: StreetSegment) -> float:
         """Calculate what percentage of the street segment was covered using pre-computed line"""
+        # Add buffer to activity line to account for GPS inaccuracy
+        buffered_activity = activity_line.buffer(CoverageConfig.BUFFER_DISTANCE / 111000)  # Convert meters to degrees
+        
         # Early exit if no intersection
-        if not activity_line.intersects(street_segment.geometry):
+        if not buffered_activity.intersects(street_segment.geometry):
             return 0.0
             
-        intersection = activity_line.intersection(street_segment.geometry)
+        intersection = buffered_activity.intersection(street_segment.geometry)
         
         if intersection.is_empty:
             return 0.0
@@ -433,7 +462,9 @@ class StravaStreetCoverageTracker:
         intersection_length = intersection.length
         street_length = street_segment.geometry.length
         
-        return intersection_length / street_length
+        ratio = intersection_length / street_length
+        
+        return ratio
         
     def create_map(self, save_path='coverage_map.html'):
         """Create an interactive map showing street coverage"""
@@ -512,7 +543,6 @@ class StravaStreetCoverageTracker:
             <b>Segment {segment_id}</b><br>
             Completed: {'Yes' if metadata['is_completed'] else 'No'}<br>
             Activities: {metadata['activity_count']}<br>
-            Coverage: {metadata['max_coverage_ratio']:.1%}
             """
             
             # Pre-compute coordinates once
@@ -603,14 +633,14 @@ if __name__ == "__main__":
     # Initialize tracker
     tracker = StravaStreetCoverageTracker(city_name, buffer_distance=CoverageConfig.BUFFER_DISTANCE)
     
-    # Load city streets
+    # Load city streets FIRST (so we can get geographic bounds)
     tracker.load_city_streets(network_type='drive')
     
-    # Load GPX files from the Strava client download
+    # Load GPX files from the Strava client download (now with geographic filtering)
     tracker.load_gpx_directory(gpx_dir)
     
     if len(tracker.activities) == 0:
-        print("No activities found! Make sure to run the Strava client first:")
+        print("No local activities found! Make sure to run the Strava client first:")
         print("python strava_client.py")
         sys.exit(1)
     
