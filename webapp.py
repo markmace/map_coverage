@@ -22,11 +22,12 @@ templates = Jinja2Templates(directory="templates")
 class CoverageResponse(BaseModel):
     city_name: str
     total_segments: int
-    covered_segments: int
+    completed_segments: int
     coverage_percentage: float
     total_activities: int
     map_url: str
     stats_url: str
+    quality_metrics: dict
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -60,18 +61,26 @@ async def analyze_coverage(
         stats_filename = f"coverage_stats_{safe_city}_{activity_type}.json"
         tracker.create_map(f"static/{map_filename}")
         tracker.export_statistics(f"static/{stats_filename}")
+        
         # Calculate coverage
         total_segments = len(tracker.street_segments)
-        covered_segments = len(tracker.covered_segments)
-        coverage_percentage = (covered_segments / total_segments) * 100 if total_segments > 0 else 0
+        completed_segments = len([s for s in tracker.street_segment_objects.values() if s.is_completed])
+        coverage_percentage = (completed_segments / total_segments) * 100 if total_segments > 0 else 0
+        
         return CoverageResponse(
             city_name=city_name,
             total_segments=total_segments,
-            covered_segments=covered_segments,
+            completed_segments=completed_segments,
             coverage_percentage=coverage_percentage,
             total_activities=len(tracker.activities),
             map_url=f"/static/{map_filename}",
-            stats_url=f"/static/{stats_filename}"
+            stats_url=f"/static/{stats_filename}",
+            quality_metrics={
+                'min_gps_accuracy': tracker.min_gps_accuracy,
+                'min_coverage_ratio': tracker.min_coverage_ratio,
+                'min_segment_length': tracker.min_segment_length,
+                'max_segment_length': tracker.max_segment_length
+            }
         )
     except HTTPException:
         raise
