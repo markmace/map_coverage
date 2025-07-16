@@ -38,7 +38,7 @@
                         id="city_name" 
                         name="city_name" 
                         required
-                        placeholder="e.g., Boston, Massachusetts, USA"
+                        placeholder="e.g., Cambridge, Massachusetts, USA"
                         class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-strava focus:border-transparent">
                     <p class="text-sm text-gray-500 mt-1">Use the full city name for best results</p>
                 </div>
@@ -71,9 +71,9 @@
                         type="text" 
                         id="gpx_dir" 
                         name="gpx_dir" 
-                        value="strava_runs"
+                        value="strava_runs/Run"
                         class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-strava focus:border-transparent">
-                    <p class="text-sm text-gray-500 mt-1">Path to your GPX files (default: strava_runs)</p>
+                    <p class="text-sm text-gray-500 mt-1">Path to your GPX files (default: strava_runs/Run)</p>
                 </div>
 
                 <!-- Submit Button -->
@@ -181,9 +181,25 @@
 
         // Update progress display
         function updateProgress(data) {
-            const { stage, current, total, percentage, message } = data;
+            const { stage, current, total, overall_progress, message } = data;
             
-            // Update progress bar
+            // Check for completion
+            if (stage === "complete") {
+                console.log('Analysis complete!');
+                document.getElementById('progress').classList.add('hidden');
+                return;
+            }
+            
+            // Check for error
+            if (stage === "error") {
+                console.log('Analysis error:', message);
+                document.getElementById('errorMessage').textContent = message;
+                document.getElementById('error').classList.remove('hidden');
+                document.getElementById('progress').classList.add('hidden');
+                return;
+            }
+            
+            // Update progress bar with overall progress
             const progressBar = document.getElementById('progressBar');
             const progressTitle = document.getElementById('progressTitle');
             const progressMessage = document.getElementById('progressMessage');
@@ -212,37 +228,26 @@
                     stageTitle = 'Generating Outputs';
                     stageDescription = 'Creating maps and statistics...';
                     break;
-                case 'error':
-                    stageTitle = 'Error';
-                    stageDescription = message;
-                    break;
                 default:
                     stageTitle = 'Processing';
                     stageDescription = message || 'Processing your data...';
             }
             
             progressTitle.textContent = stageTitle;
-            progressMessage.textContent = stageDescription;
+            progressMessage.textContent = message || stageDescription;
             
-            // Update progress bar
-            progressBar.style.width = `${percentage}%`;
+            // Update progress bar with overall progress
+            progressBar.style.width = `${overall_progress}%`;
             
             // Update detailed progress info
             if (total > 0) {
                 stageInfo.textContent = `Stage: ${stageTitle}`;
                 countInfo.textContent = `Progress: ${current} / ${total}`;
-                percentageInfo.textContent = `Completion: ${percentage.toFixed(1)}%`;
+                percentageInfo.textContent = `Overall: ${overall_progress.toFixed(1)}%`;
             } else {
                 stageInfo.textContent = `Stage: ${stageTitle}`;
                 countInfo.textContent = '';
                 percentageInfo.textContent = message;
-            }
-            
-            // If we're done, hide progress and show results
-            if (stage === 'generating_outputs' && current === total && total > 0) {
-                setTimeout(() => {
-                    document.getElementById('progress').classList.add('hidden');
-                }, 1000);
             }
         }
 

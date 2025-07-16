@@ -82,14 +82,31 @@ async def analyze_coverage(
     
     tracker = StravaStreetCoverageTracker(city_name, buffer_distance=20)
     
-    # Add progress callback to tracker
+    # Add progress callback to tracker with weighted progress calculation
     async def progress_callback(stage: str, current: int, total: int, message: str = ""):
+        # Calculate overall progress based on weighted stages
+        if stage == "loading_streets":
+            overall_progress = (current / total) * 5  # 0-5%
+            detailed_message = "Loading city street network..."
+        elif stage == "loading_activities":
+            overall_progress = 5 + (current / total) * 5  # 5-10%
+            detailed_message = f"Loading GPX activities... ({current}/{total})"
+        elif stage == "processing_activities":
+            overall_progress = 10 + (current / total * 85)  # 10-95%
+            detailed_message = f"Processing activity {current} of {total}"
+        elif stage == "generating_outputs":
+            overall_progress = 95 + (current / total) * 5  # 95-100%
+            detailed_message = message or "Generating outputs..."
+        else:
+            overall_progress = 0
+            detailed_message = message
+        
         progress_data = {
             "stage": stage,
             "current": current,
             "total": total,
-            "percentage": (current / total * 100) if total > 0 else 0,
-            "message": message
+            "overall_progress": overall_progress,
+            "message": detailed_message
         }
         await manager.send_progress(progress_data)
     
@@ -106,7 +123,7 @@ async def analyze_coverage(
             raise HTTPException(status_code=400, detail="No valid GPX files found in directory")
         await progress_callback("loading_activities", 1, 1, f"Loaded {len(tracker.activities)} activities")
         
-        # Process activities with progress updates
+        # Process activities with detailed progress updates
         total_activities = len(tracker.activities)
         for i, activity in enumerate(tracker.activities):
             # Process each activity
@@ -130,8 +147,8 @@ async def analyze_coverage(
                         if street_segment.is_completed:
                             tracker.covered_segments.add(segment_id)
             
-            # Send progress update every 10 activities or on last activity
-            if (i + 1) % 10 == 0 or (i + 1) == total_activities:
+            # Send progress update every 5 activities or on last activity
+            if (i + 1) % 5 == 0 or (i + 1) == total_activities:
                 await progress_callback("processing_activities", i + 1, total_activities, 
                                      f"Processed {i + 1}/{total_activities} activities")
         
@@ -147,6 +164,15 @@ async def analyze_coverage(
         await progress_callback("generating_outputs", 1, 2, "Generating statistics...")
         tracker.export_statistics(f"static/{stats_filename}")
         await progress_callback("generating_outputs", 2, 2, "Analysis complete!")
+        
+        # Send explicit completion message
+        await manager.send_progress({
+            "stage": "complete",
+            "overall_progress": 100,
+            "message": "Analysis complete!",
+            "current": 1,
+            "total": 1
+        })
         
         # Calculate coverage
         total_segments = len(tracker.street_segments)
@@ -171,7 +197,13 @@ async def analyze_coverage(
     except HTTPException:
         raise
     except Exception as e:
-        await progress_callback("error", 0, 1, f"Error: {str(e)}")
+        await manager.send_progress({
+            "stage": "error",
+            "overall_progress": 0,
+            "message": f"Error: {str(e)}",
+            "current": 0,
+            "total": 1
+        })
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 if __name__ == "__main__":

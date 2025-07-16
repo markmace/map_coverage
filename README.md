@@ -2,7 +2,16 @@
 
 A Python application to track street coverage from Strava activities using GPS data. See how much of your city you've explored on foot!
 
-![Street Coverage Tracker](docs/app_screenshot.png)
+## Screenshots
+
+### Home Screen
+![Home Screen](docs/home_screen.png)
+
+### Loading with Progress
+![Loading with Progress](docs/loading_screen.png)
+
+### Interactive Coverage Map
+![Interactive Coverage Map](docs/map_screen.png)
 
 ## What You Need
 
